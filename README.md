@@ -32,7 +32,7 @@ python3 -m http.server 3966
 
 ## Test
 
-E2E suite (Playwright, headless Chromium) — 30 checks (movement, pickup, watcher light behavior, win/restart, jumpscare, rendering, zero JS errors):
+E2E suite (Playwright, headless Chromium) — 31 checks (movement, pickup, watcher light behavior, win/restart, jumpscare, rendering, zero JS errors):
 
 ```bash
 uv run --with playwright python tests/e2e.py
