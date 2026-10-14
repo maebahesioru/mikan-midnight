@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0a0806">
+<title>真夜中のミカン - Midnight Mikan</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍊</text></svg>">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #060504; }
+  body {
+    font-family: 'Noto Sans JP', 'Hiragino Sans', 'Yu Gothic', system-ui, sans-serif;
+    color: #d8cdb8; user-select: none; -webkit-user-select: none; touch-action: none;
+  }
+  #game { position: fixed; inset: 0; display: block; cursor: crosshair; }
+  #hud {
+    position: fixed; top: 14px; left: 0; right: 0; display: flex; justify-content: center;
+    gap: 26px; font-size: 1rem; font-weight: 700; letter-spacing: 1px;
+    text-shadow: 0 2px 8px #000; pointer-events: none; z-index: 5;
+  }
+  #hud .dim { color: #7d7261; }
+  #danger {
+    position: fixed; inset: 0; pointer-events: none; z-index: 4;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(120, 10, 5, 0.55) 100%);
+    opacity: 0; transition: opacity 0.25s;
+  }
+  .screen {
+    position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center; padding: 24px;
+    background: radial-gradient(ellipse at center, rgba(20, 12, 4, 0.82) 0%, rgba(4, 3, 2, 0.96) 75%);
+  }
+  .screen.hidden { display: none; }
+  .hidden { display: none; }
+  #hud.hidden { display: none; }
+  body.scare #hud, body.scare footer { display: none; }
+  .screen h1 { font-size: clamp(2rem, 7vw, 3.4rem); letter-spacing: 6px; color: #f0a13a; text-shadow: 0 0 24px rgba(240, 140, 30, 0.35); }
+  .screen .en { font-size: 0.95rem; letter-spacing: 4px; color: #7d7261; margin-top: 6px; }
+  .screen .story { max-width: 480px; margin: 26px auto 10px; line-height: 2; font-size: 0.98rem; color: #b9ab8f; }
+  .screen .story .em { color: #f0a13a; }
+  .screen .controls { margin: 18px auto 6px; font-size: 0.85rem; color: #8d8170; line-height: 1.9; }
+  .screen button {
+    margin-top: 22px; font-family: inherit; font-size: 1.05rem; font-weight: 800; letter-spacing: 2px;
+    padding: 14px 44px; border: 2px solid #f0a13a; border-radius: 999px; cursor: pointer;
+    color: #0a0806; background: linear-gradient(135deg, #f0a13a, #d97f16);
+    box-shadow: 0 0 30px rgba(240, 140, 30, 0.25); transition: transform 0.1s, box-shadow 0.2s;
+  }
+  .screen button:hover { box-shadow: 0 0 44px rgba(240, 140, 30, 0.45); }
+  .screen button:active { transform: scale(0.97); }
+  #over h1 { color: #e04a2a; text-shadow: 0 0 24px rgba(220, 60, 30, 0.5); }
+  #win h1 { color: #8fd45a; text-shadow: 0 0 24px rgba(120, 210, 70, 0.35); }
+  .result { margin-top: 18px; font-size: 1.1rem; line-height: 2; }
+  .result .big { font-size: 1.7rem; font-weight: 800; color: #f0a13a; font-variant-numeric: tabular-nums; }
+  footer { position: fixed; bottom: 10px; left: 0; right: 0; text-align: center; font-size: 0.7rem; color: #4a4238; z-index: 6; pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="danger"></div>
+<div id="hud" class="hidden">
+  <span>🍊 <span id="hudCount">0</span>/8</span>
+  <span class="dim" id="hudTime">00:00</span>
+</div>
+
+<div id="title" class="screen">
+  <h1>真夜中のミカン</h1>
+  <div class="en">MIDNIGHT MIKAN</div>
+  <div class="story">
+    真夜中のミカン園。誰もいないはずの畑に、<br>
+    みかんが<span class="em">8つだけ</span>ぽつぽつと光っている。<br><br>
+    全部集めて、門から出るんだ。<br>
+    ……あなたは、ひとりじゃない。
+  </div>
+  <div class="controls">
+    移動 = 矢印キー / WASD / 長押し（クリック・タッチ）<br>
+    懐中電灯は進む向きを照らす。光を当てると、やつは怯んで下がる。
+  </div>
+  <button id="startBtn">はじめる</button>
+</div>
+
+<div id="over" class="screen hidden">
+  <h1>見つかってしまった</h1>
+  <div class="en">CAUGHT</div>
+  <div class="result" id="overResult"></div>
+  <button id="retryBtn">もう一度</button>
+</div>
+
+<div id="win" class="screen hidden">
+  <h1>脱出成功</h1>
+  <div class="en">ESCAPED</div>
+  <div class="result" id="winResult"></div>
+  <button id="againBtn">もう一度</button>
+</div>
+
+<footer>真夜中のミカン — Midnight Mikan / made for Hack Club Scare</footer>
+
+<script>
+'use strict';
+// =====================================================================
+// 真夜中のミカン — Midnight Mikan
+// A tiny top-down horror game: gather 8 glowing mikans in a pitch-dark
+// orchard, flashlight-only, while something watches from the shadows.
+// Single file, zero assets: everything (art, audio, terrain) is procedural.
+// =====================================================================
+
+// ---------- constants ----------
+const WORLD = { w: 1600, h: 1000 };
+const TOTAL_MIKANS = 8;
+const PLAYER_SPEED = 175;
+const WATCHER_SPEED = 108;      // slower than the player — you can run, but not forever
+const WATCHER_SLOW = 34;        // while lit by the flashlight it cowers and backs away
+const LIGHT_RANGE = 380;
+const LIGHT_HALF = 0.46;        // cone half-angle (rad)
+const CATCH_DIST = 30;
+
+// ---------- canvas ----------
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let CW = window.innerWidth, CH = window.innerHeight;
+function resize() {
+  CW = window.innerWidth; CH = window.innerHeight;
+  canvas.width = CW; canvas.height = CH;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ---------- helpers ----------
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+function angDiff(a, b) { let d = a - b; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; }
+function fmtTime(s) {
+  const m = Math.floor(s / 60).toString().padStart(2, '0');
+  const ss = Math.floor(s % 60).toString().padStart(2, '0');
+  return m + ':' + ss;
+}
+
+// ---------- audio (fully procedural, guarded) ----------
+let AC = null;
+function ac() {
+  try {
+    if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)();
+    if (AC.state === 'suspended') AC.resume().catch(() => {});
+    return AC;
+  } catch { return null; }
+}
+let droneNodes = null;
+function startDrone() {
+  const a = ac(); if (!a || droneNodes) return;
+  try {
+    const g = a.createGain(); g.gain.value = 0.0001;
+    const lp = a.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 130;
+    const o1 = a.createOscillator(); o1.type = 'sawtooth'; o1.frequency.value = 55;
+    const o2 = a.createOscillator(); o2.type = 'sawtooth'; o2.frequency.value = 55.6;
+    const o3 = a.createOscillator(); o3.type = 'sine'; o3.frequency.value = 110.3;
+    o1.connect(lp); o2.connect(lp); o3.connect(lp); lp.connect(g); g.connect(a.destination);
+    o1.start(); o2.start(); o3.start();
+    g.gain.exponentialRampToValueAtTime(0.055, a.currentTime + 2.5);
+    // slow breathing LFO
+    const lfo = a.createOscillator(); lfo.frequency.value = 0.07;
+    const lg = a.createGain(); lg.gain.value = 0.02;
+    lfo.connect(lg); lg.connect(g.gain); lfo.start();
+    droneNodes = { o1, o2, o3, lfo, g };
+  } catch {}
+}
+function stopDrone() {
+  if (!droneNodes) return;
+  try {
+    const a = ac();
+    droneNodes.g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + 0.6);
+    const d = droneNodes; droneNodes = null;
+    setTimeout(() => { try { d.o1.stop(); d.o2.stop(); d.o3.stop(); d.lfo.stop(); } catch {} }, 800);
+  } catch { droneNodes = null; }
+}
+function thump(vol = 0.5) {
+  const a = ac(); if (!a) return;
+  try {
+    const t = a.currentTime;
+    for (const [dt, v] of [[0, vol], [0.16, vol * 0.6]]) {
+      const o = a.createOscillator(); o.type = 'sine'; o.frequency.value = 52;
+      const g = a.createGain();
+      g.gain.setValueAtTime(0.0001, t + dt);
+      g.gain.exponentialRampToValueAtTime(v, t + dt + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.13);
+      o.connect(g).connect(a.destination); o.start(t + dt); o.stop(t + dt + 0.2);
+    }
+  } catch {}
+}
+function pickupSound() {
+  const a = ac(); if (!a) return;
+  try {
+    const t = a.currentTime;
+    const o = a.createOscillator(); o.type = 'triangle';
+    o.frequency.setValueAtTime(740, t); o.frequency.exponentialRampToValueAtTime(1180, t + 0.12);
+    const g = a.createGain();
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.16, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+    o.connect(g).connect(a.destination); o.start(t); o.stop(t + 0.35);
+  } catch {}
+}
+function scareSound() {
+  const a = ac(); if (!a) return;
+  try {
+    const t = a.currentTime;
+    // noise burst
+    const len = Math.floor(a.sampleRate * 0.9);
+    const buf = a.createBuffer(1, len, a.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const src = a.createBufferSource(); src.buffer = buf;
+    const ng = a.createGain(); ng.gain.value = 0.5;
+    src.connect(ng).connect(a.destination); src.start(t);
+    // descending shriek
+    const o = a.createOscillator(); o.type = 'sawtooth';
+    o.frequency.setValueAtTime(1400, t); o.frequency.exponentialRampToValueAtTime(90, t + 0.8);
+    const g = a.createGain();
+    g.gain.setValueAtTime(0.42, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.85);
+    o.connect(g).connect(a.destination); o.start(t); o.stop(t + 0.9);
+    // high warble
+    const o2 = a.createOscillator(); o2.type = 'square';
+    o2.frequency.setValueAtTime(1900, t); o2.frequency.exponentialRampToValueAtTime(320, t + 0.5);
+    const g2 = a.createGain(); g2.gain.setValueAtTime(0.12, t); g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
+    o2.connect(g2).connect(a.destination); o2.start(t); o2.stop(t + 0.6);
+  } catch {}
+}
+function winSound() {
+  const a = ac(); if (!a) return;
+  try {
+    const t = a.currentTime;
+    [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
+      const o = a.createOscillator(); o.type = 'sine'; o.frequency.value = f;
+      const g = a.createGain();
+      const dt = i * 0.13;
+      g.gain.setValueAtTime(0.0001, t + dt);
+      g.gain.exponentialRampToValueAtTime(0.2, t + dt + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.5);
+      o.connect(g).connect(a.destination); o.start(t + dt); o.stop(t + dt + 0.6);
+    });
+  } catch {}
+}
+
+// ---------- terrain (pre-rendered once) ----------
+const terrain = document.createElement('canvas');
+terrain.width = WORLD.w; terrain.height = WORLD.h;
+(function buildTerrain() {
+  const t = terrain.getContext('2d');
+  t.fillStyle = '#17120a';
+  t.fillRect(0, 0, WORLD.w, WORLD.h);
+  // soil patches
+  for (let i = 0; i < 340; i++) {
+    const x = Math.random() * WORLD.w, y = Math.random() * WORLD.h, r = 12 + Math.random() * 46;
+    t.fillStyle = Math.random() < 0.5 ? 'rgba(42, 36, 20, 0.5)' : 'rgba(16, 20, 10, 0.55)';
+    t.beginPath(); t.ellipse(x, y, r, r * 0.6, Math.random() * 3, 0, 7); t.fill();
+  }
+  // faint grass strokes
+  t.strokeStyle = 'rgba(64, 74, 38, 0.35)'; t.lineWidth = 1.4;
+  for (let i = 0; i < 1500; i++) {
+    const x = Math.random() * WORLD.w, y = Math.random() * WORLD.h;
+    t.beginPath(); t.moveTo(x, y); t.lineTo(x + (Math.random() - 0.5) * 7, y - 4 - Math.random() * 7); t.stroke();
+  }
+})();
+
+// ---------- game state ----------
+const MM = {
+  state: 'title',            // title | play | caught | win
+  time: 0,                   // play time (s)
+  trees: [],
+  mikans: [],
+  collected: 0,
+  player: { x: WORLD.w / 2, y: WORLD.h / 2, r: 11, face: -Math.PI / 2 },
+  watchers: [],
+  gate: { x: WORLD.w - 110, y: 96, r: 30 },
+  keys: {},
+  pointer: { x: 0, y: 0, down: false },
+  cam: { x: 0, y: 0 },
+  hbTimer: 0,
+  shake: 0,
+  caughtAt: 0,
+  faceScale: 0,
+};
+window.MM = MM; // debug / test hook
+
+function spawnWorld() {
+  MM.trees = [];
+  MM.mikans = [];
+  MM.collected = 0;
+  MM.time = 0;
+  MM.shake = 0; MM.faceScale = 0;
+  MM.player.x = WORLD.w / 2; MM.player.y = WORLD.h / 2; MM.player.face = -Math.PI / 2;
+  MM.watchers = [
+    { x: 90, y: WORLD.h - 90, r: 13, active: false, lit: false, spawnDelay: 6 },
+    { x: WORLD.w - 90, y: WORLD.h - 110, r: 13, active: false, lit: false, spawnDelay: 20 },
+  ];
+  // trees — keep clear of center, gate, and later mikans
+  const busy = [{ x: MM.player.x, y: MM.player.y, r: 130 }, { x: MM.gate.x, y: MM.gate.y, r: 150 }];
+  let guard = 0;
+  while (MM.trees.length < 46 && guard++ < 900) {
+    const tr = { x: 60 + Math.random() * (WORLD.w - 120), y: 60 + Math.random() * (WORLD.h - 120), r: 26 + Math.random() * 32 };
+    if (busy.some(b => Math.hypot(b.x - tr.x, b.y - tr.y) < b.r + tr.r)) continue;
+    if (MM.trees.some(o => Math.hypot(o.x - tr.x, o.y - tr.y) < o.r + tr.r + 26)) continue;
+    MM.trees.push(tr);
+  }
+  // mikans — free spots, not too close together
+  guard = 0;
+  while (MM.mikans.length < TOTAL_MIKANS && guard++ < 900) {
+    const m = { x: 70 + Math.random() * (WORLD.w - 140), y: 70 + Math.random() * (WORLD.h - 140), phase: Math.random() * 7 };
+    if (busy.some(b => Math.hypot(b.x - m.x, b.y - m.y) < 90)) continue;
+    if (MM.trees.some(o => Math.hypot(o.x - m.x, o.y - m.y) < o.r + 24)) continue;
+    if (MM.mikans.some(o => Math.hypot(o.x - m.x, o.y - m.y) < 150)) continue;
+    MM.mikans.push(m);
+  }
+}
+
+// ---------- input ----------
+window.addEventListener('keydown', (e) => {
+  MM.keys[e.key.toLowerCase()] = true;
+  if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(e.key.toLowerCase())) e.preventDefault();
+  if (e.key === 'Enter' || e.key === ' ') {
+    if (MM.state === 'title') start();
+    else if (MM.state === 'caught' || MM.state === 'win') start();
+  }
+});
+window.addEventListener('keyup', (e) => { MM.keys[e.key.toLowerCase()] = false; });
+function pointerPos(e) {
+  const r = canvas.getBoundingClientRect();
+  const p = e.touches ? e.touches[0] : e;
+  return { x: p.clientX - r.left, y: p.clientY - r.top };
+}
+function onDown(e) { MM.pointer.down = true; const p = pointerPos(e); MM.pointer.x = p.x; MM.pointer.y = p.y; e.preventDefault(); }
+function onMove(e) { if (!MM.pointer.down) return; const p = pointerPos(e); MM.pointer.x = p.x; MM.pointer.y = p.y; e.preventDefault(); }
+function onUp() { MM.pointer.down = false; }
+canvas.addEventListener('mousedown', onDown);
+canvas.addEventListener('mousemove', onMove);
+window.addEventListener('mouseup', onUp);
+canvas.addEventListener('touchstart', onDown, { passive: false });
+canvas.addEventListener('touchmove', onMove, { passive: false });
+window.addEventListener('touchend', onUp);
+
+// ---------- flow ----------
+const el = (id) => document.getElementById(id);
+function showScreen(id) {
+  for (const s of ['title', 'over', 'win']) el(s).classList.toggle('hidden', s !== id);
+  el('hud').classList.toggle('hidden', id !== null);
+}
+function start() {
+  spawnWorld();
+  MM.state = 'play';
+  showScreen(null);
+  document.body.classList.remove('scare');
+  el('danger').style.opacity = '0';
+  ac();
+  startDrone();
+}
+el('startBtn').addEventListener('click', start);
+el('retryBtn').addEventListener('click', start);
+el('againBtn').addEventListener('click', start);
+
+function caught() {
+  MM.state = 'caught';
+  MM.caughtAt = performance.now();
+  MM.faceScale = 0;
+  MM.shake = 30;
+  scareSound();
+  stopDrone();
+  document.body.classList.add('scare');
+  el('danger').style.opacity = '1';
+  // NOTE: innerHTML is safe here — the only interpolated values are
+  // internal numbers (counts) and fmtTime() output; no user input ever reaches this string.
+  el('overResult').innerHTML = `集めたみかん: <span class="big">${MM.collected}/${TOTAL_MIKANS}</span><br>生き延びた時間: <span class="big">${fmtTime(MM.time)}</span>`;
+  setTimeout(() => { if (MM.state === 'caught') showScreen('over'); }, 1300);
+}
+function escaped() {
+  MM.state = 'win';
+  winSound();
+  stopDrone();
+  let best = null;
+  try {
+    best = parseFloat(localStorage.getItem('midnight-mikan-best') || '');
+    if (!best || MM.time < best) { best = MM.time; localStorage.setItem('midnight-mikan-best', String(best)); }
+  } catch {}
+  el('winResult').innerHTML = `クリアタイム: <span class="big">${fmtTime(MM.time)}</span><br>ベスト: <span class="big">${fmtTime(best || MM.time)}</span>`;
+  showScreen('win');
+}
+
+// ---------- update ----------
+function movePlayer(dt) {
+  const p = MM.player;
+  let dx = 0, dy = 0;
+  const k = MM.keys;
+  if (k['arrowleft'] || k['a']) dx -= 1;
+  if (k['arrowright'] || k['d']) dx += 1;
+  if (k['arrowup'] || k['w']) dy -= 1;
+  if (k['arrowdown'] || k['s']) dy += 1;
+  if (dx === 0 && dy === 0 && MM.pointer.down) {
+    const wx = MM.pointer.x + MM.cam.x, wy = MM.pointer.y + MM.cam.y;
+    const d = Math.hypot(wx - p.x, wy - p.y);
+    if (d > 14) { dx = (wx - p.x) / d; dy = (wy - p.y) / d; }
+  }
+  const len = Math.hypot(dx, dy);
+  if (len > 0) {
+    dx /= len; dy /= len;
+    p.x += dx * PLAYER_SPEED * dt;
+    p.y += dy * PLAYER_SPEED * dt;
+    const target = Math.atan2(dy, dx);
+    p.face += angDiff(target, p.face) * Math.min(1, dt * 10);
+  }
+  // tree collision (player only — the watchers drift through trees)
+  for (const tr of MM.trees) {
+    const d = Math.hypot(p.x - tr.x, p.y - tr.y), min = tr.r + p.r;
+    if (d < min && d > 0.001) {
+      const push = (min - d);
+      p.x += ((p.x - tr.x) / d) * push;
+      p.y += ((p.y - tr.y) / d) * push;
+    }
+  }
+  p.x = clamp(p.x, 24, WORLD.w - 24);
+  p.y = clamp(p.y, 24, WORLD.h - 24);
+}
+
+function inLight(w) {
+  const p = MM.player;
+  const d = dist(p, w);
+  if (d > LIGHT_RANGE) return false;
+  const ang = Math.atan2(w.y - p.y, w.x - p.x);
+  return Math.abs(angDiff(ang, p.face)) < LIGHT_HALF + 0.12;
+}
+
+function moveWatchers(dt) {
+  const p = MM.player;
+  for (const w of MM.watchers) {
+    if (!w.active) {
+      w.spawnDelay -= dt;
+      if (w.spawnDelay <= 0 || MM.collected >= 5) w.active = true;
+      if (!w.active) continue;
+    }
+    w.lit = inLight(w);
+    const d = dist(p, w);
+    const ang = Math.atan2(p.y - w.y, p.x - w.x);
+    // lit by the flashlight -> it cowers and backs away; otherwise it hunts
+    const dir = w.lit ? -1 : 1;
+    const speed = w.lit ? WATCHER_SLOW : WATCHER_SPEED;
+    // slight wobble so it feels alive
+    const wob = Math.sin(MM.time * 2.1 + w.x * 0.01) * 0.35;
+    w.x += Math.cos(ang + wob) * speed * dt * dir;
+    w.y += Math.sin(ang + wob) * speed * dt * dir;
+    if (d < CATCH_DIST && MM.state === 'play') { caught(); return; }
+  }
+}
+
+function updateMikans() {
+  const p = MM.player;
+  for (const m of MM.mikans) {
+    if (m.got) continue;
+    if (dist(p, m) < p.r + 16) {
+      m.got = true;
+      MM.collected++;
+      pickupSound();
+    }
+  }
+  if (MM.collected >= TOTAL_MIKANS) {
+    if (dist(p, MM.gate) < MM.gate.r + 16) escaped();
+  }
+}
+
+function dangerLevel() {
+  let d = Infinity;
+  for (const w of MM.watchers) if (w.active) d = Math.min(d, dist(MM.player, w));
+  return clamp(1 - d / 420, 0, 1);
+}
+
+function updateHUD() {
+  el('hudCount').textContent = String(MM.collected);
+  el('hudTime').textContent = fmtTime(MM.time);
+  const danger = MM.state === 'play' ? dangerLevel() : 0;
+  el('danger').style.opacity = String(danger * 0.9);
+  // heartbeat rate scales with proximity
+  if (MM.state === 'play') {
+    MM.hbTimer -= 1 / 60;
+    if (MM.hbTimer <= 0) {
+      const interval = clamp(1.35 - danger * 1.0, 0.34, 1.35);
+      thump(0.18 + danger * 0.4);
+      MM.hbTimer = interval;
+    }
+  }
+}
+
+// ---------- render ----------
+const dark = document.createElement('canvas');
+const dctx = dark.getContext('2d');
+
+function drawWorld() {
+  // camera
+  const cx = clamp(MM.player.x - CW / 2, 0, Math.max(0, WORLD.w - CW));
+  const cy = clamp(MM.player.y - CH / 2, 0, Math.max(0, WORLD.h - CH));
+  MM.cam.x = cx; MM.cam.y = cy;
+
+  let sx = 0, sy = 0;
+  if (MM.shake > 0.5) {
+    sx = (Math.random() - 0.5) * MM.shake;
+    sy = (Math.random() - 0.5) * MM.shake;
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#050403';
+  ctx.fillRect(0, 0, CW, CH);
+  ctx.translate(-cx + sx, -cy + sy);
+
+  ctx.drawImage(terrain, 0, 0);
+
+  // trees (silhouettes, slightly raised)
+  for (const tr of MM.trees) {
+    ctx.fillStyle = '#070a05';
+    ctx.beginPath(); ctx.arc(tr.x, tr.y + 6, tr.r, 0, 7); ctx.fill();
+    ctx.fillStyle = '#0c1208';
+    ctx.beginPath(); ctx.arc(tr.x, tr.y, tr.r * 0.92, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(30, 40, 18, 0.5)';
+    ctx.beginPath(); ctx.arc(tr.x - tr.r * 0.25, tr.y - tr.r * 0.3, tr.r * 0.4, 0, 7); ctx.fill();
+  }
+
+  // mikans — soft pulsing glow (visible faintly even in the dark)
+  const pulse = 0.7 + Math.sin(MM.time * 3.2) * 0.3;
+  for (const m of MM.mikans) {
+    if (m.got) continue;
+    const g = ctx.createRadialGradient(m.x, m.y, 1, m.x, m.y, 26);
+    g.addColorStop(0, `rgba(245, 166, 35, ${0.5 * pulse})`);
+    g.addColorStop(1, 'rgba(245, 166, 35, 0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(m.x, m.y, 26, 0, 7); ctx.fill();
+    ctx.fillStyle = '#f5a623';
+    ctx.beginPath(); ctx.arc(m.x, m.y, 5, 0, 7); ctx.fill();
+    ctx.fillStyle = '#7ab84a';
+    ctx.fillRect(m.x - 1.5, m.y - 9, 3, 4);
+  }
+
+  // gate (lantern lights up once every mikan is collected)
+  const gateOpen = MM.collected >= TOTAL_MIKANS;
+  ctx.fillStyle = '#1b1409';
+  ctx.fillRect(MM.gate.x - 34, MM.gate.y - 8, 68, 12);
+  ctx.fillRect(MM.gate.x - 34, MM.gate.y - 44, 7, 46);
+  ctx.fillRect(MM.gate.x + 27, MM.gate.y - 44, 7, 46);
+  ctx.fillRect(MM.gate.x - 38, MM.gate.y - 50, 76, 8);
+  if (gateOpen) {
+    const gp = 0.75 + Math.sin(MM.time * 5) * 0.25;
+    const g2 = ctx.createRadialGradient(MM.gate.x, MM.gate.y - 20, 4, MM.gate.x, MM.gate.y - 20, 90);
+    g2.addColorStop(0, `rgba(255, 214, 120, ${0.55 * gp})`);
+    g2.addColorStop(1, 'rgba(255, 214, 120, 0)');
+    ctx.fillStyle = g2;
+    ctx.beginPath(); ctx.arc(MM.gate.x, MM.gate.y - 20, 90, 0, 7); ctx.fill();
+    ctx.fillStyle = '#ffd678';
+    ctx.beginPath(); ctx.arc(MM.gate.x, MM.gate.y - 20, 7 * gp + 3, 0, 7); ctx.fill();
+  }
+
+  // watchers — shadow figures; eyes glow faintly, body firms up when lit or close
+  for (const w of MM.watchers) {
+    if (!w.active) continue;
+    const d = dist(MM.player, w);
+    const vis = w.lit ? 1 : clamp(1 - (d - 90) / 260, 0.12, 0.5);
+    ctx.fillStyle = `rgba(3, 3, 6, ${0.85 * vis + 0.1})`;
+    ctx.beginPath();
+    ctx.ellipse(w.x, w.y + 4, w.r * 1.05, w.r * 1.5, 0, 0, 7);
+    ctx.fill();
+    // head
+    ctx.beginPath(); ctx.arc(w.x, w.y - w.r * 0.9, w.r * 0.75, 0, 7); ctx.fill();
+    // eyes
+    const eg = w.lit ? 0.95 : 0.45;
+    ctx.fillStyle = `rgba(255, 235, 200, ${eg})`;
+    ctx.beginPath(); ctx.arc(w.x - 4, w.y - w.r * 1.0, 2.1, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(w.x + 4, w.y - w.r * 1.0, 2.1, 0, 7); ctx.fill();
+  }
+
+  // player (tiny figure with a direction nub)
+  const p = MM.player;
+  ctx.fillStyle = '#2a2416';
+  ctx.beginPath(); ctx.arc(p.x, p.y + 5, p.r, 0, 7); ctx.fill();
+  ctx.fillStyle = '#4a3f24';
+  ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 0.85, 0, 7); ctx.fill();
+  ctx.fillStyle = '#ffd678';
+  ctx.beginPath();
+  ctx.arc(p.x + Math.cos(p.face) * (p.r + 4), p.y + Math.sin(p.face) * (p.r + 4), 3.4, 0, 7);
+  ctx.fill();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+function drawDarkness() {
+  if (dark.width !== CW || dark.height !== CH) { dark.width = CW; dark.height = CH; }
+  dctx.setTransform(1, 0, 0, 1, 0, 0);
+  dctx.clearRect(0, 0, CW, CH);
+  dctx.fillStyle = 'rgba(3, 3, 6, 0.955)';
+  dctx.fillRect(0, 0, CW, CH);
+  const p = MM.player;
+  const px = p.x - MM.cam.x, py = p.y - MM.cam.y;
+  // light flickers when something is near
+  const danger = MM.state === 'play' ? dangerLevel() : 0;
+  const flick = 1 - danger * 0.35 * (0.5 + Math.abs(Math.sin(MM.time * 13)) * 0.5);
+  const range = LIGHT_RANGE * flick;
+  dctx.globalCompositeOperation = 'destination-out';
+  // cone
+  const grad = dctx.createRadialGradient(px, py, 10, px, py, range);
+  grad.addColorStop(0, 'rgba(0,0,0,0.98)');
+  grad.addColorStop(0.55, 'rgba(0,0,0,0.85)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  dctx.fillStyle = grad;
+  dctx.beginPath();
+  dctx.moveTo(px, py);
+  dctx.arc(px, py, range, p.face - LIGHT_HALF, p.face + LIGHT_HALF);
+  dctx.closePath();
+  dctx.fill();
+  // small halo around the player
+  const halo = dctx.createRadialGradient(px, py, 2, px, py, 70);
+  halo.addColorStop(0, 'rgba(0,0,0,0.9)');
+  halo.addColorStop(1, 'rgba(0,0,0,0)');
+  dctx.fillStyle = halo;
+  dctx.beginPath(); dctx.arc(px, py, 70, 0, 7); dctx.fill();
+  // mikan glows punch tiny holes so they shimmer in the dark
+  for (const m of MM.mikans) {
+    if (m.got) continue;
+    const mx = m.x - MM.cam.x, my = m.y - MM.cam.y;
+    if (mx < -40 || my < -40 || mx > CW + 40 || my > CH + 40) continue;
+    const mg = dctx.createRadialGradient(mx, my, 1, mx, my, 13);
+    mg.addColorStop(0, 'rgba(0,0,0,0.5)');
+    mg.addColorStop(1, 'rgba(0,0,0,0)');
+    dctx.fillStyle = mg;
+    dctx.beginPath(); dctx.arc(mx, my, 13, 0, 7); dctx.fill();
+  }
+  dctx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(dark, 0, 0);
+}
+
+function drawLightGlow() {
+  // additive warm light inside the cone — makes the lit ground actually readable
+  const p = MM.player;
+  const px = p.x - MM.cam.x, py = p.y - MM.cam.y;
+  const danger = MM.state === 'play' ? dangerLevel() : 0;
+  const flick = 1 - danger * 0.35 * (0.5 + Math.abs(Math.sin(MM.time * 13)) * 0.5);
+  const range = LIGHT_RANGE * flick;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const g = ctx.createRadialGradient(px, py, 10, px, py, range);
+  g.addColorStop(0, 'rgba(255, 200, 130, 0.17)');
+  g.addColorStop(0.5, 'rgba(255, 190, 120, 0.10)');
+  g.addColorStop(1, 'rgba(255, 190, 120, 0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(px, py);
+  ctx.arc(px, py, range, p.face - LIGHT_HALF, p.face + LIGHT_HALF);
+  ctx.closePath();
+  ctx.fill();
+  // soft warm halo around the player
+  const hg = ctx.createRadialGradient(px, py, 2, px, py, 95);
+  hg.addColorStop(0, 'rgba(255, 210, 150, 0.13)');
+  hg.addColorStop(1, 'rgba(255, 210, 150, 0)');
+  ctx.fillStyle = hg;
+  ctx.beginPath(); ctx.arc(px, py, 95, 0, 7); ctx.fill();
+  ctx.restore();
+}
+
+function drawOverlays() {
+  // warm tint inside the light, grain, vignette
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  // film grain
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+  for (let i = 0; i < 90; i++) {
+    ctx.fillRect(Math.random() * CW, Math.random() * CH, 1.3, 1.3);
+  }
+  // vignette
+  const v = ctx.createRadialGradient(CW / 2, CH / 2, Math.min(CW, CH) * 0.35, CW / 2, CH / 2, Math.max(CW, CH) * 0.72);
+  v.addColorStop(0, 'rgba(0,0,0,0)');
+  v.addColorStop(1, 'rgba(0,0,0,0.6)');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, CW, CH);
+
+  // the scare face during 'caught'
+  if (MM.state === 'caught') {
+    const dt = (performance.now() - MM.caughtAt) / 1000;
+    MM.faceScale = Math.min(1, dt * 2.4);
+    const s = MM.faceScale;
+    const fw = Math.min(CW, CH) * (0.5 + s * 0.55);
+    const fx = CW / 2, fy = CH / 2;
+    ctx.save();
+    ctx.translate(fx, fy);
+    ctx.rotate(Math.sin(dt * 23) * 0.025);
+    ctx.scale(s + 0.25, s + 0.25);
+    ctx.globalAlpha = Math.min(1, dt * 3);
+    const R = fw * 0.42;
+    // sickly rotten skin (dark, shading to near-black at the rim)
+    const skin = ctx.createRadialGradient(-R * 0.2, -R * 0.25, R * 0.1, 0, 0, R);
+    skin.addColorStop(0, '#b4560e');
+    skin.addColorStop(0.65, '#8a3d08');
+    skin.addColorStop(1, '#452004');
+    ctx.fillStyle = skin;
+    ctx.beginPath(); ctx.arc(0, 0, R, 0, 7); ctx.fill();
+    // rot blotches
+    for (let i = 0; i < 26; i++) {
+      const a = i * 2.4, rr = R * (0.25 + (i % 5) * 0.14);
+      ctx.fillStyle = i % 3 === 0 ? 'rgba(38, 16, 30, 0.45)' : 'rgba(56, 28, 6, 0.5)';
+      ctx.beginPath(); ctx.ellipse(Math.cos(a) * rr, Math.sin(a) * rr * 0.9, R * 0.05 + (i % 4) * 2, R * 0.04, a, 0, 7); ctx.fill();
+    }
+    // cracks
+    ctx.strokeStyle = 'rgba(20, 8, 4, 0.6)'; ctx.lineWidth = Math.max(1.5, R * 0.02);
+    ctx.beginPath(); ctx.moveTo(-R * 0.75, -R * 0.1); ctx.lineTo(-R * 0.3, R * 0.05); ctx.lineTo(-R * 0.45, R * 0.4); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(R * 0.7, -R * 0.2); ctx.lineTo(R * 0.35, R * 0.1); ctx.lineTo(R * 0.6, R * 0.35); ctx.stroke();
+    // hollow eyes with rot dripping underneath + faint red pinpoints
+    for (const sx of [-1, 1]) {
+      ctx.fillStyle = '#050302';
+      ctx.beginPath(); ctx.ellipse(sx * R * 0.34, -R * 0.18, R * 0.155, R * 0.2, 0, 0, 7); ctx.fill();
+      for (let k = 0; k < 3; k++) {
+        const dx = sx * R * 0.34 + (k - 1) * R * 0.06;
+        ctx.fillRect(dx - R * 0.012, -R * 0.02, R * 0.024, R * (0.22 + (k % 2) * 0.16));
+      }
+      const pg = ctx.createRadialGradient(sx * R * 0.34, -R * 0.18, 0, sx * R * 0.34, -R * 0.18, R * 0.07);
+      pg.addColorStop(0, 'rgba(255, 70, 40, 0.95)');
+      pg.addColorStop(1, 'rgba(255, 70, 40, 0)');
+      ctx.fillStyle = pg;
+      ctx.beginPath(); ctx.arc(sx * R * 0.34, -R * 0.18, R * 0.07, 0, 7); ctx.fill();
+    }
+    // gaping jagged maw
+    ctx.fillStyle = '#050302';
+    ctx.beginPath();
+    const n = 10, r0 = R * 0.2, r1 = R * 0.46;
+    for (let i = 0; i <= n; i++) {
+      const a = Math.PI * 0.2 + (i / n) * Math.PI * 0.6;
+      const r = i % 2 === 0 ? r0 : r1;
+      const x = Math.cos(a) * r * 1.35, y = Math.sin(a) * r * 1.05 + R * 0.32;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath(); ctx.fill();
+    // uneven teeth inside the maw
+    ctx.fillStyle = '#cfc09a';
+    for (let i = 0; i < 5; i++) {
+      const tx = -R * 0.4 + i * R * 0.2;
+      const th = R * (0.1 + (i % 2) * 0.05);
+      ctx.beginPath();
+      ctx.moveTo(tx, R * 0.26); ctx.lineTo(tx + R * 0.07, R * 0.26); ctx.lineTo(tx + R * 0.035, R * 0.26 + th);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ---------- main loop ----------
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  if (MM.state === 'play') {
+    MM.time += dt;
+    movePlayer(dt);
+    moveWatchers(dt);
+    updateMikans();
+  }
+  if (MM.shake > 0) MM.shake = Math.max(0, MM.shake - dt * 60);
+  drawWorld();
+  drawDarkness();
+  drawLightGlow();
+  drawOverlays();
+  updateHUD();
+  requestAnimationFrame(frame);
+}
+
+// ---------- boot ----------
+spawnWorld();
+showScreen('title');
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
