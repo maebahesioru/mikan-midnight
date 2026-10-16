@@ -118,6 +118,7 @@
   <button id="resumeBtn">再開</button>
   <button id="restartBtn">最初から</button>
   <button id="muteBtn">音: ON</button>
+  <button id="gentleBtn">演出: 標準</button>
   <button id="quitBtn">タイトルへ</button>
 </div>
 
@@ -311,6 +312,7 @@ const MM = {
   caughtAt: 0,
   faceScale: 0,
   muted: false,              // sound off (persisted in localStorage)
+  gentle: false,             // softer scares (accessibility, persisted)
 };
 window.MM = MM; // debug / test hook
 
@@ -412,6 +414,14 @@ function applyMuteUI() {
   el('muteIcon').classList.toggle('hidden', !MM.muted);
   el('muteBtn').textContent = MM.muted ? '音: OFF' : '音: ON';
 }
+function applyGentleUI() {
+  el('gentleBtn').textContent = MM.gentle ? '演出: 控えめ' : '演出: 標準';
+}
+function toggleGentle() {
+  MM.gentle = !MM.gentle;
+  try { localStorage.setItem('midnight-mikan-gentle', MM.gentle ? '1' : '0'); } catch {}
+  applyGentleUI();
+}
 function toggleMute() {
   MM.muted = !MM.muted;
   try { localStorage.setItem('midnight-mikan-muted', MM.muted ? '1' : '0'); } catch {}
@@ -442,14 +452,16 @@ el('pauseBtn').addEventListener('click', pause);
 el('resumeBtn').addEventListener('click', resume);
 el('restartBtn').addEventListener('click', start);
 el('muteBtn').addEventListener('click', toggleMute);
+el('gentleBtn').addEventListener('click', toggleGentle);
 el('quitBtn').addEventListener('click', quitToTitle);
 try { MM.muted = localStorage.getItem('midnight-mikan-muted') === '1'; } catch {}
+try { MM.gentle = localStorage.getItem('midnight-mikan-gentle') === '1'; } catch {}
 
 function caught() {
   MM.state = 'caught';
   MM.caughtAt = performance.now();
   MM.faceScale = 0;
-  MM.shake = 30;
+  MM.shake = MM.gentle ? 8 : 30;
   scareSound();
   stopDrone();
   document.body.classList.add('scare');
@@ -562,7 +574,7 @@ function updateHUD() {
   el('hudCount').textContent = String(MM.collected);
   el('hudTime').textContent = fmtTime(MM.time);
   const danger = MM.state === 'play' ? dangerLevel() : 0;
-  el('danger').style.opacity = String(danger * 0.9);
+  el('danger').style.opacity = String(danger * (MM.gentle ? 0.5 : 0.9));
   // heartbeat rate scales with proximity
   if (MM.state === 'play') {
     MM.hbTimer -= 1 / 60;
@@ -680,7 +692,8 @@ function drawDarkness() {
   const px = p.x - MM.cam.x, py = p.y - MM.cam.y;
   // light flickers when something is near
   const danger = MM.state === 'play' ? dangerLevel() : 0;
-  const flick = 1 - danger * 0.35 * (0.5 + Math.abs(Math.sin(MM.time * 13)) * 0.5);
+  const flickAmt = MM.gentle ? 0.18 : 0.35;
+  const flick = 1 - danger * flickAmt * (0.5 + Math.abs(Math.sin(MM.time * 13)) * 0.5);
   const range = LIGHT_RANGE * flick;
   dctx.globalCompositeOperation = 'destination-out';
   // cone
@@ -720,7 +733,8 @@ function drawLightGlow() {
   const p = MM.player;
   const px = p.x - MM.cam.x, py = p.y - MM.cam.y;
   const danger = MM.state === 'play' ? dangerLevel() : 0;
-  const flick = 1 - danger * 0.35 * (0.5 + Math.abs(Math.sin(MM.time * 13)) * 0.5);
+  const flickAmt = MM.gentle ? 0.18 : 0.35;
+  const flick = 1 - danger * flickAmt * (0.5 + Math.abs(Math.sin(MM.time * 13)) * 0.5);
   const range = LIGHT_RANGE * flick;
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
@@ -761,15 +775,15 @@ function drawOverlays() {
   // the scare face during 'caught'
   if (MM.state === 'caught') {
     const dt = (performance.now() - MM.caughtAt) / 1000;
-    MM.faceScale = Math.min(1, dt * 2.4);
+    MM.faceScale = Math.min(1, dt * (MM.gentle ? 1.5 : 2.4));
     const s = MM.faceScale;
     const fw = Math.min(CW, CH) * (0.5 + s * 0.55);
     const fx = CW / 2, fy = CH / 2;
     ctx.save();
     ctx.translate(fx, fy);
-    ctx.rotate(Math.sin(dt * 23) * 0.025);
+    ctx.rotate(Math.sin(dt * 23) * (MM.gentle ? 0.008 : 0.025));
     ctx.scale(s + 0.25, s + 0.25);
-    ctx.globalAlpha = Math.min(1, dt * 3);
+    ctx.globalAlpha = Math.min(1, dt * (MM.gentle ? 2 : 3));
     const R = fw * 0.42;
     // sickly rotten skin (dark, shading to near-black at the rim)
     const skin = ctx.createRadialGradient(-R * 0.2, -R * 0.25, R * 0.1, 0, 0, R);
@@ -851,6 +865,7 @@ function frame(now) {
 spawnWorld();
 refreshBest();
 applyMuteUI();
+applyGentleUI();
 showScreen('title');
 requestAnimationFrame(frame);
 </script>

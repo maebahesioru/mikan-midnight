@@ -8,8 +8,9 @@ Covers: title screen, start flow, keyboard movement + facing, mikan pickup,
 HUD counters, watcher light/cower behavior (lit -> retreats, unlit -> hunts),
 full collect -> gate -> win + best time, restart, caught jumpscare -> game over,
 pause menu (Escape/P/button, frozen clock, restart, quit), sound toggle (M key
-+ pause button, persisted), title best-time display + content warning after
-reload, canvas rendering, zero JS errors.
++ pause button, persisted), gentle-scares mode (softer jumpscare/vignette,
+persisted), title best-time display + content warning after reload, canvas
+rendering, zero JS errors.
 """
 import asyncio
 import json
@@ -115,6 +116,21 @@ async def main():
         )
         await page.click("#muteBtn")
         await page.wait_for_timeout(150)
+        await page.click("#gentleBtn")
+        await page.wait_for_timeout(150)
+        gentle_label = await page.text_content("#gentleBtn")
+        check(
+            "pause gentle button toggles + label",
+            await page.evaluate("MM.gentle") is True and "控えめ" in (gentle_label or ""),
+            str(gentle_label),
+        )
+        check(
+            "gentle persisted",
+            await page.evaluate("localStorage.getItem('midnight-mikan-gentle')") == "1",
+        )
+        await page.click("#gentleBtn")
+        await page.wait_for_timeout(150)
+        check("gentle off again", await page.evaluate("MM.gentle") is False)
         await page.click("#quitBtn")
         await page.wait_for_timeout(250)
         check("quit -> title", await page.evaluate("MM.state") == "title")
@@ -123,6 +139,30 @@ async def main():
         await page.click("#startBtn")
         await page.wait_for_timeout(300)
         check("start again after quit -> play", await page.evaluate("MM.state") == "play")
+
+        # 2c. gentle mode visual effect (during play)
+        await page.evaluate(
+            "MM.gentle = true; MM.watchers[0].active = true;"
+            "MM.watchers[0].x = MM.player.x - 250; MM.watchers[0].y = MM.player.y"
+        )
+        await page.wait_for_timeout(120)
+        op_gentle = await page.evaluate(
+            "parseFloat(document.getElementById('danger').style.opacity) || 0"
+        )
+        await page.evaluate(
+            "MM.gentle = false;"
+            "MM.watchers[0].x = MM.player.x - 250; MM.watchers[0].y = MM.player.y"
+        )
+        await page.wait_for_timeout(120)
+        op_norm = await page.evaluate(
+            "parseFloat(document.getElementById('danger').style.opacity) || 0"
+        )
+        check(
+            "gentle mode softens danger vignette",
+            op_gentle < op_norm * 0.75,
+            f"{op_gentle:.2f} vs {op_norm:.2f}",
+        )
+        await page.evaluate("MM.watchers[0].active = false; MM.watchers[0].spawnDelay = 9999")
 
         # 3. keyboard movement + facing
         x0 = await page.evaluate("MM.player.x")
@@ -229,6 +269,7 @@ async def main():
         # 10. title extras: saved best time + content warning (after reload)
         await page.evaluate("localStorage.setItem('midnight-mikan-best', '42.5')")
         await page.evaluate("localStorage.setItem('midnight-mikan-muted', '1')")
+        await page.evaluate("localStorage.setItem('midnight-mikan-gentle', '1')")
         await page.reload()
         await page.wait_for_timeout(600)
         check("state title after reload", await page.evaluate("MM.state") == "title")
@@ -238,6 +279,7 @@ async def main():
         warn = await page.text_content("#title .warn")
         check("content warning shown on title", "点滅" in (warn or ""), str(warn))
         check("mute state restored after reload", await page.evaluate("MM.muted") is True)
+        check("gentle state restored after reload", await page.evaluate("MM.gentle") is True)
 
         # 11. no JS errors
         results["js_errors"] = errors
