@@ -7,7 +7,9 @@ Run:
 Covers: title screen, start flow, keyboard movement + facing, mikan pickup,
 HUD counters, watcher light/cower behavior (lit -> retreats, unlit -> hunts),
 full collect -> gate -> win + best time, restart, caught jumpscare -> game over,
-canvas rendering, zero JS errors.
+pause menu (Escape/P/button, frozen clock, restart, quit), sound toggle (M key
++ pause button, persisted), title best-time display + content warning after
+reload, canvas rendering, zero JS errors.
 """
 import asyncio
 import json
@@ -50,6 +52,7 @@ async def main():
         results["mikan_count"] = await page.evaluate("MM.mikans.length")
         check("8 mikans spawned", results["mikan_count"] == 8, str(results["mikan_count"]))
         check("state starts as title", await page.evaluate("MM.state") == "title")
+        check("pause button hidden on title", await page.locator("#pauseBtn").is_hidden())
 
         # 2. start
         await page.click("#startBtn")
@@ -57,6 +60,69 @@ async def main():
         check("state -> play", await page.evaluate("MM.state") == "play")
         check("title hidden after start", await page.locator("#title").is_hidden())
         check("hud visible in play", await page.locator("#hud").is_visible())
+        check("pause button visible in play", await page.locator("#pauseBtn").is_visible())
+
+        # 2b. pause / resume / mute / quit (v1.1)
+        await page.keyboard.press("Escape")
+        await page.wait_for_timeout(250)
+        check("Escape -> pause", await page.evaluate("MM.state") == "pause")
+        check("pause screen visible", await page.locator("#pause").is_visible())
+        check("hud hidden in pause", await page.locator("#hud").is_hidden())
+        t0 = await page.evaluate("MM.time")
+        await page.wait_for_timeout(500)
+        t1 = await page.evaluate("MM.time")
+        check("time frozen while paused", abs(t1 - t0) < 0.05, f"{t0:.2f} -> {t1:.2f}")
+        await page.keyboard.press("Escape")
+        await page.wait_for_timeout(250)
+        check("Escape again -> resume", await page.evaluate("MM.state") == "play")
+        await page.click("#pauseBtn")
+        await page.wait_for_timeout(250)
+        check("pause button -> pause", await page.evaluate("MM.state") == "pause")
+        await page.click("#resumeBtn")
+        await page.wait_for_timeout(250)
+        check("resume button -> play", await page.evaluate("MM.state") == "play")
+        await page.keyboard.press("p")
+        await page.wait_for_timeout(250)
+        check("P key -> pause", await page.evaluate("MM.state") == "pause")
+        await page.click("#restartBtn")
+        await page.wait_for_timeout(350)
+        check("restart from pause -> play", await page.evaluate("MM.state") == "play")
+        check("restart from pause resets count", await page.evaluate("MM.collected") == 0)
+        await page.keyboard.press("m")
+        await page.wait_for_timeout(150)
+        check("M -> muted", await page.evaluate("MM.muted") is True)
+        check(
+            "mute persisted to localStorage",
+            await page.evaluate("localStorage.getItem('midnight-mikan-muted')") == "1",
+        )
+        check("mute icon visible when muted", await page.locator("#muteIcon").is_visible())
+        await page.keyboard.press("m")
+        await page.wait_for_timeout(150)
+        check("M again -> unmuted", await page.evaluate("MM.muted") is False)
+        check(
+            "unmute persisted",
+            await page.evaluate("localStorage.getItem('midnight-mikan-muted')") == "0",
+        )
+        await page.keyboard.press("Escape")
+        await page.wait_for_timeout(200)
+        await page.click("#muteBtn")
+        await page.wait_for_timeout(150)
+        mute_label = await page.text_content("#muteBtn")
+        check(
+            "pause mute button toggles + label",
+            await page.evaluate("MM.muted") is True and "OFF" in (mute_label or ""),
+            str(mute_label),
+        )
+        await page.click("#muteBtn")
+        await page.wait_for_timeout(150)
+        await page.click("#quitBtn")
+        await page.wait_for_timeout(250)
+        check("quit -> title", await page.evaluate("MM.state") == "title")
+        check("title visible after quit", await page.locator("#title").is_visible())
+        check("pause button hidden after quit", await page.locator("#pauseBtn").is_hidden())
+        await page.click("#startBtn")
+        await page.wait_for_timeout(300)
+        check("start again after quit -> play", await page.evaluate("MM.state") == "play")
 
         # 3. keyboard movement + facing
         x0 = await page.evaluate("MM.player.x")
@@ -160,7 +226,20 @@ async def main():
         results["canvas_px"] = px
         check("canvas has rendered pixels", px > 100, str(px))
 
-        # 10. no JS errors
+        # 10. title extras: saved best time + content warning (after reload)
+        await page.evaluate("localStorage.setItem('midnight-mikan-best', '42.5')")
+        await page.evaluate("localStorage.setItem('midnight-mikan-muted', '1')")
+        await page.reload()
+        await page.wait_for_timeout(600)
+        check("state title after reload", await page.evaluate("MM.state") == "title")
+        check("best line visible with saved best", await page.locator("#bestLine").is_visible())
+        best_text = await page.text_content("#bestTime")
+        check("best time formatted from storage", (best_text or "").strip() == "00:42", str(best_text))
+        warn = await page.text_content("#title .warn")
+        check("content warning shown on title", "点滅" in (warn or ""), str(warn))
+        check("mute state restored after reload", await page.evaluate("MM.muted") is True)
+
+        # 11. no JS errors
         results["js_errors"] = errors
         check("no JS errors", len(errors) == 0, "; ".join(errors[:3]))
 

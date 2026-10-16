@@ -51,15 +51,31 @@
   #win h1 { color: #8fd45a; text-shadow: 0 0 24px rgba(120, 210, 70, 0.35); }
   .result { margin-top: 18px; font-size: 1.1rem; line-height: 2; }
   .result .big { font-size: 1.7rem; font-weight: 800; color: #f0a13a; font-variant-numeric: tabular-nums; }
+  #pauseBtn {
+    position: fixed; top: 10px; right: 12px; z-index: 6;
+    width: 46px; height: 42px; border-radius: 12px;
+    border: 1.5px solid #4a4238; background: rgba(10, 8, 6, 0.72);
+    color: #d8cdb8; font-size: 0.95rem; letter-spacing: 2px; cursor: pointer;
+  }
+  #pauseBtn.hidden { display: none; }
+  #pauseBtn:hover { border-color: #f0a13a; color: #f0a13a; }
+  body.scare #pauseBtn { display: none; }
+  #pause button { margin-top: 12px; padding: 11px 36px; font-size: 0.95rem; }
+  #pause .controls { margin-top: 10px; }
+  .warn { margin-top: 16px; font-size: 0.74rem; letter-spacing: 0.5px; color: #8d8170; }
+  .best { margin-top: 10px; font-size: 0.92rem; letter-spacing: 1px; color: #f0a13a; font-variant-numeric: tabular-nums; }
+  .best.hidden { display: none; }
   footer { position: fixed; bottom: 10px; left: 0; right: 0; text-align: center; font-size: 0.7rem; color: #4a4238; z-index: 6; pointer-events: none; }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
 <div id="danger"></div>
+<button id="pauseBtn" class="hidden" aria-label="一時停止">❚❚</button>
 <div id="hud" class="hidden">
   <span>🍊 <span id="hudCount">0</span>/8</span>
   <span class="dim" id="hudTime">00:00</span>
+  <span id="muteIcon" class="hidden">🔇</span>
 </div>
 
 <div id="title" class="screen">
@@ -71,10 +87,13 @@
     全部集めて、門から出るんだ。<br>
     ……あなたは、ひとりじゃない。
   </div>
+  <div class="best hidden" id="bestLine">ベストタイム <span id="bestTime">--:--</span></div>
   <div class="controls">
     移動 = 矢印キー / WASD / 長押し（クリック・タッチ）<br>
-    懐中電灯は進む向きを照らす。光を当てると、やつは怯んで下がる。
+    懐中電灯は進む向きを照らす。光を当てると、やつは怯んで下がる。<br>
+    一時停止 = ESC / P（スマホは❚❚ボタン）・音 = M
   </div>
+  <div class="warn">⚠ 突然の大きな音・画面の点滅があります</div>
   <button id="startBtn">はじめる</button>
 </div>
 
@@ -92,7 +111,17 @@
   <button id="againBtn">もう一度</button>
 </div>
 
-<footer>真夜中のミカン — Midnight Mikan / made for Hack Club Scare</footer>
+<div id="pause" class="screen hidden">
+  <h1>一時停止</h1>
+  <div class="en">PAUSED</div>
+  <div class="controls">ESC / P でも再開できます</div>
+  <button id="resumeBtn">再開</button>
+  <button id="restartBtn">最初から</button>
+  <button id="muteBtn">音: ON</button>
+  <button id="quitBtn">タイトルへ</button>
+</div>
+
+<footer>真夜中のミカン — Midnight Mikan v1.1 / made for Hack Club Scare</footer>
 
 <script>
 'use strict';
@@ -145,6 +174,7 @@ function ac() {
 }
 let droneNodes = null;
 function startDrone() {
+  if (MM.muted) return;
   const a = ac(); if (!a || droneNodes) return;
   try {
     const g = a.createGain(); g.gain.value = 0.0001;
@@ -172,6 +202,7 @@ function stopDrone() {
   } catch { droneNodes = null; }
 }
 function thump(vol = 0.5) {
+  if (MM.muted) return;
   const a = ac(); if (!a) return;
   try {
     const t = a.currentTime;
@@ -186,6 +217,7 @@ function thump(vol = 0.5) {
   } catch {}
 }
 function pickupSound() {
+  if (MM.muted) return;
   const a = ac(); if (!a) return;
   try {
     const t = a.currentTime;
@@ -198,6 +230,7 @@ function pickupSound() {
   } catch {}
 }
 function scareSound() {
+  if (MM.muted) return;
   const a = ac(); if (!a) return;
   try {
     const t = a.currentTime;
@@ -223,6 +256,7 @@ function scareSound() {
   } catch {}
 }
 function winSound() {
+  if (MM.muted) return;
   const a = ac(); if (!a) return;
   try {
     const t = a.currentTime;
@@ -276,6 +310,7 @@ const MM = {
   shake: 0,
   caughtAt: 0,
   faceScale: 0,
+  muted: false,              // sound off (persisted in localStorage)
 };
 window.MM = MM; // debug / test hook
 
@@ -314,6 +349,13 @@ function spawnWorld() {
 window.addEventListener('keydown', (e) => {
   MM.keys[e.key.toLowerCase()] = true;
   if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(e.key.toLowerCase())) e.preventDefault();
+  const k = e.key.toLowerCase();
+  if (k === 'escape' || k === 'p') {
+    if (MM.state === 'play') pause();
+    else if (MM.state === 'pause') resume();
+    return;
+  }
+  if (k === 'm') { toggleMute(); return; }
   if (e.key === 'Enter' || e.key === ' ') {
     if (MM.state === 'title') start();
     else if (MM.state === 'caught' || MM.state === 'win') start();
@@ -338,8 +380,9 @@ window.addEventListener('touchend', onUp);
 // ---------- flow ----------
 const el = (id) => document.getElementById(id);
 function showScreen(id) {
-  for (const s of ['title', 'over', 'win']) el(s).classList.toggle('hidden', s !== id);
+  for (const s of ['title', 'over', 'win', 'pause']) el(s).classList.toggle('hidden', s !== id);
   el('hud').classList.toggle('hidden', id !== null);
+  el('pauseBtn').classList.toggle('hidden', id !== null);
 }
 function start() {
   spawnWorld();
@@ -353,6 +396,54 @@ function start() {
 el('startBtn').addEventListener('click', start);
 el('retryBtn').addEventListener('click', start);
 el('againBtn').addEventListener('click', start);
+
+// ---------- pause / sound / best (v1.1) ----------
+function refreshBest() {
+  let best = null;
+  try { best = parseFloat(localStorage.getItem('midnight-mikan-best') || ''); } catch {}
+  if (best && best > 0) {
+    el('bestTime').textContent = fmtTime(best);
+    el('bestLine').classList.remove('hidden');
+  } else {
+    el('bestLine').classList.add('hidden');
+  }
+}
+function applyMuteUI() {
+  el('muteIcon').classList.toggle('hidden', !MM.muted);
+  el('muteBtn').textContent = MM.muted ? '音: OFF' : '音: ON';
+}
+function toggleMute() {
+  MM.muted = !MM.muted;
+  try { localStorage.setItem('midnight-mikan-muted', MM.muted ? '1' : '0'); } catch {}
+  applyMuteUI();
+  if (MM.muted) stopDrone();
+  else if (MM.state === 'play') startDrone();
+}
+function pause() {
+  if (MM.state !== 'play') return;
+  MM.state = 'pause';
+  MM.pointer.down = false;
+  stopDrone();
+  showScreen('pause');
+}
+function resume() {
+  if (MM.state !== 'pause') return;
+  MM.state = 'play';
+  showScreen(null);
+  startDrone(); // no-op while muted
+}
+function quitToTitle() {
+  MM.state = 'title';
+  stopDrone();
+  refreshBest();
+  showScreen('title');
+}
+el('pauseBtn').addEventListener('click', pause);
+el('resumeBtn').addEventListener('click', resume);
+el('restartBtn').addEventListener('click', start);
+el('muteBtn').addEventListener('click', toggleMute);
+el('quitBtn').addEventListener('click', quitToTitle);
+try { MM.muted = localStorage.getItem('midnight-mikan-muted') === '1'; } catch {}
 
 function caught() {
   MM.state = 'caught';
@@ -758,6 +849,8 @@ function frame(now) {
 
 // ---------- boot ----------
 spawnWorld();
+refreshBest();
+applyMuteUI();
 showScreen('title');
 requestAnimationFrame(frame);
 </script>
